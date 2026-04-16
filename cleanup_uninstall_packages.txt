@@ -1,0 +1,9 @@
+To preserve SSD space when pacing this project, run the following in your active virtual environment terminal:
+
+pip uninstall -y fastapi uvicorn ultralytics opencv-python websockets transformers pillow tensorrt torch torchvision torchaudio
+
+Then strictly delete the following heavyweight files inside the backend folder:
+- yolo11l.engine
+- yolo11l.pt
+
+When returning to the project later, reinstall the requirements.txt, and the scripts will auto-build the weights back onto your machine perfectly fresh!

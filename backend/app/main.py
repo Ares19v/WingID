@@ -158,23 +158,28 @@ def run_ai_eye(shared_streaming_active: multiprocessing.Value) -> None:
     import time
     import websockets as ws_lib
     import PIL.Image
+    import torch
     from ultralytics import YOLO
     from transformers import pipeline as hf_pipeline
 
-    print("[WingID] Loading detection model...")
+    # ── Device detection ────────────────────────────────────────────────────
+    cuda_available = torch.cuda.is_available()
+    device = 0 if cuda_available else "cpu"
+    print(f"[WingID] Device: {'CUDA:0 (GPU)' if cuda_available else 'CPU (no CUDA detected)'}")
+
+    # TensorRT .engine files are GPU-only — skip if running on CPU
     engine_path = os.path.join(os.path.dirname(__file__), "..", "yolo11l.engine")
     pt_path = os.path.join(os.path.dirname(__file__), "..", "yolo11l.pt")
-
-    # Prefer compiled TensorRT engine; fall back to .pt if engine not present
-    model_path = engine_path if os.path.exists(engine_path) else pt_path
-    print(f"[WingID] Using model: {os.path.basename(model_path)}")
+    model_path = (engine_path if (cuda_available and os.path.exists(engine_path))
+                  else pt_path)
+    print(f"[WingID] Loading model: {os.path.basename(model_path)}")
     model = YOLO(model_path, task="detect")
 
     print("[WingID] Loading CLIP zero-shot classifier...")
     classifier = hf_pipeline(
         "zero-shot-image-classification",
         model="openai/clip-vit-base-patch32",
-        device=0,
+        device=device,
     )
     print("[WingID] Intelligence databanks online.")
 
@@ -206,7 +211,7 @@ def run_ai_eye(shared_streaming_active: multiprocessing.Value) -> None:
                             frame,
                             conf=0.85,
                             verbose=False,
-                            device=0,
+                            device=device,
                             classes=[4],
                         )
                         annotated = results[0].plot()

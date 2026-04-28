@@ -245,7 +245,7 @@ def _inference_worker(
                     # Stage 3 — Pinhole altitude estimate
                     w_px = box.xywh[0][2].item()
                     dist_m = (int((REAL_AIRCRAFT_SIZE_M * FOCAL_LENGTH_PX) / w_px)
-                               if w_px > 0 else 0)
+                              if w_px > 0 else 0)
 
                     boxes.append((x1, y1, x2, y2, label, conf, dist_m))
                     telemetry.append(
@@ -271,7 +271,6 @@ def run_ai_eye(shared_streaming_active: multiprocessing.Value) -> None:
         30 FPS and overlays the latest detection boxes — giving smooth
         video regardless of inference speed.
     """
-    import time
     import websockets as ws_lib
     import torch
     from ultralytics import YOLO
@@ -284,9 +283,9 @@ def run_ai_eye(shared_streaming_active: multiprocessing.Value) -> None:
 
     # TensorRT .engine is GPU-only
     engine_path = os.path.join(os.path.dirname(__file__), "..", "yolo11l.engine")
-    pt_path     = os.path.join(os.path.dirname(__file__), "..", "yolo11l.pt")
-    model_path  = (engine_path if (cuda_available and os.path.exists(engine_path))
-                   else pt_path)
+    pt_path = os.path.join(os.path.dirname(__file__), "..", "yolo11l.pt")
+    model_path = (engine_path if (cuda_available and os.path.exists(engine_path))
+                  else pt_path)
     print(f"[WingID] Loading model: {os.path.basename(model_path)}")
     model = YOLO(model_path, task="detect")
 
@@ -299,7 +298,7 @@ def run_ai_eye(shared_streaming_active: multiprocessing.Value) -> None:
     print("[WingID] Intelligence databanks online.")
 
     stream = VideoStream().start()
-    state  = _InferenceState()
+    state = _InferenceState()
 
     # Start ML inference on a background thread (non-blocking relative to send loop)
     inf_thread = threading.Thread(

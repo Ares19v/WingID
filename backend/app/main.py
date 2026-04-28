@@ -146,18 +146,133 @@ TACTICAL_LABELS: list[str] = [
 # ML Engine (runs in child process)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Inference state — shared between the ML thread and the async send loop
+# ---------------------------------------------------------------------------
+
+class _InferenceState:
+    """Thread-safe container for the latest ML detection results."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.boxes: list[tuple] = []     # (x1,y1,x2,y2,label,conf,dist_m)
+        self.telemetry: list[str] = []   # formatted strings for the UI
+
+    def update(self, boxes, telemetry) -> None:
+        with self._lock:
+            self.boxes = boxes
+            self.telemetry = telemetry
+
+    def read(self) -> tuple[list, list]:
+        with self._lock:
+            return list(self.boxes), list(self.telemetry)
+
+
+def _draw_detections(frame, boxes: list[tuple]):
+    """
+    Overlay the latest bounding boxes onto *frame* in-place.
+    Uses OpenCV directly so we can annotate the CURRENT camera frame
+    rather than the (potentially stale) frame from the last inference pass.
+    """
+    for (x1, y1, x2, y2, label, conf, dist_m) in boxes:
+        h, w = frame.shape[:2]
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w - 1, x2), min(h - 1, y2)
+
+        # Bounding box
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+        # Label background + text
+        short = label[:24]
+        tag = f"{short}  {conf:.0f}%  {dist_m}m"
+        (tw, th), _ = cv2.getTextSize(tag, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        cy = max(y1 - 4, th + 6)
+        cv2.rectangle(frame, (x1, cy - th - 6), (x1 + tw + 8, cy + 2), (0, 200, 0), -1)
+        cv2.putText(frame, tag, (x1 + 4, cy - 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+    return frame
+
+
+def _inference_worker(
+    stream: "VideoStream",
+    model,
+    classifier,
+    device,
+    state: "_InferenceState",
+    shared_streaming_active: multiprocessing.Value,
+) -> None:
+    """
+    Runs YOLO + CLIP continuously on a background thread.
+    Processes frames as fast as hardware allows and stores results in *state*.
+    The async send loop reads *state* independently at 30 FPS.
+    """
+    import time
+    import PIL.Image
+
+    while True:
+        if not shared_streaming_active.value:
+            time.sleep(0.05)
+            continue
+
+        frame = stream.read()
+        if frame is None:
+            time.sleep(0.01)
+            continue
+
+        try:
+            results = model(frame, conf=0.85, verbose=False,
+                            device=device, classes=[4])
+            boxes: list[tuple] = []
+            telemetry: list[str] = []
+
+            for box in results[0].boxes:
+                try:
+                    x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                    h, w = frame.shape[:2]
+                    x1, y1 = max(0, x1), max(0, y1)
+                    x2, y2 = min(w, x2), min(h, y2)
+                    crop = frame[y1:y2, x1:x2]
+                    if crop.size == 0:
+                        continue
+
+                    # Stage 2 — CLIP zero-shot classification
+                    rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                    pil_img = PIL.Image.fromarray(rgb_crop)
+                    preds = classifier(pil_img, candidate_labels=TACTICAL_LABELS)
+                    label = preds[0]["label"]
+                    conf = round(preds[0]["score"] * 100, 1)
+
+                    # Stage 3 — Pinhole altitude estimate
+                    w_px = box.xywh[0][2].item()
+                    dist_m = (int((REAL_AIRCRAFT_SIZE_M * FOCAL_LENGTH_PX) / w_px)
+                               if w_px > 0 else 0)
+
+                    boxes.append((x1, y1, x2, y2, label, conf, dist_m))
+                    telemetry.append(
+                        f"[{label.upper()}] | CONF:{conf}% | ALT:{dist_m}m"
+                    )
+                except Exception:
+                    pass
+
+            state.update(boxes, telemetry)
+
+        except Exception:
+            pass
+
+
 def run_ai_eye(shared_streaming_active: multiprocessing.Value) -> None:
     """
     ML inference daemon — spawned as a separate OS process.
 
-    Receives *shared_streaming_active* explicitly so that the Windows
-    spawn-mode child process shares the same underlying memory segment as
-    the FastAPI parent process (module-level globals are NOT shared on
-    Windows spawn).
+    Architecture:
+      • _inference_worker() runs YOLO+CLIP on a background thread at
+        whatever FPS the hardware allows (1 FPS CPU / 60 FPS GPU).
+      • process_stream() async loop reads the CURRENT camera frame at
+        30 FPS and overlays the latest detection boxes — giving smooth
+        video regardless of inference speed.
     """
     import time
     import websockets as ws_lib
-    import PIL.Image
     import torch
     from ultralytics import YOLO
     from transformers import pipeline as hf_pipeline
@@ -165,13 +280,13 @@ def run_ai_eye(shared_streaming_active: multiprocessing.Value) -> None:
     # ── Device detection ────────────────────────────────────────────────────
     cuda_available = torch.cuda.is_available()
     device = 0 if cuda_available else "cpu"
-    print(f"[WingID] Device: {'CUDA:0 (GPU)' if cuda_available else 'CPU (no CUDA detected)'}")
+    print(f"[WingID] Device: {'CUDA:0 (GPU)' if cuda_available else 'CPU — inference thread decoupled from stream'}")
 
-    # TensorRT .engine files are GPU-only — skip if running on CPU
+    # TensorRT .engine is GPU-only
     engine_path = os.path.join(os.path.dirname(__file__), "..", "yolo11l.engine")
-    pt_path = os.path.join(os.path.dirname(__file__), "..", "yolo11l.pt")
-    model_path = (engine_path if (cuda_available and os.path.exists(engine_path))
-                  else pt_path)
+    pt_path     = os.path.join(os.path.dirname(__file__), "..", "yolo11l.pt")
+    model_path  = (engine_path if (cuda_available and os.path.exists(engine_path))
+                   else pt_path)
     print(f"[WingID] Loading model: {os.path.basename(model_path)}")
     model = YOLO(model_path, task="detect")
 
@@ -184,10 +299,20 @@ def run_ai_eye(shared_streaming_active: multiprocessing.Value) -> None:
     print("[WingID] Intelligence databanks online.")
 
     stream = VideoStream().start()
+    state  = _InferenceState()
 
+    # Start ML inference on a background thread (non-blocking relative to send loop)
+    inf_thread = threading.Thread(
+        target=_inference_worker,
+        args=(stream, model, classifier, device, state, shared_streaming_active),
+        daemon=True,
+    )
+    inf_thread.start()
+    print("[WingID] Inference thread started.")
+
+    # ── Async send loop — always runs at ~30 FPS ────────────────────────────
     async def process_stream() -> None:
-        # Use asyncio.sleep (non-blocking) instead of time.sleep (blocks event loop)
-        await asyncio.sleep(3)  # Wait for FastAPI server to be ready
+        await asyncio.sleep(3)   # wait for FastAPI server to be ready
         while True:
             try:
                 async with ws_lib.connect(
@@ -196,9 +321,8 @@ def run_ai_eye(shared_streaming_active: multiprocessing.Value) -> None:
                 ) as ws:
                     print("[WingID] ML engine secured internal handshake.")
                     while True:
-                        # Pause: idle without forwarding frames
                         if not shared_streaming_active.value:
-                            await asyncio.sleep(0.1)
+                            await asyncio.sleep(0.05)
                             continue
 
                         frame = stream.read()
@@ -206,61 +330,21 @@ def run_ai_eye(shared_streaming_active: multiprocessing.Value) -> None:
                             await asyncio.sleep(0.01)
                             continue
 
-                        # Stage 1 — YOLO: detect aircraft (COCO class 4) only
-                        results = model(
-                            frame,
-                            conf=0.85,
-                            verbose=False,
-                            device=device,
-                            classes=[4],
-                        )
-                        annotated = results[0].plot()
-
-                        telemetry: list[str] = []
-                        for box in results[0].boxes:
-                            try:
-                                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                                h, w, _ = frame.shape
-                                x1, y1 = max(0, x1), max(0, y1)
-                                x2, y2 = min(w, x2), min(h, y2)
-                                crop = frame[y1:y2, x1:x2]
-
-                                if crop.size == 0:
-                                    continue
-
-                                # Stage 2 — CLIP: zero-shot aircraft type ID
-                                rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-                                pil_img = PIL.Image.fromarray(rgb_crop)
-                                preds = classifier(
-                                    pil_img,
-                                    candidate_labels=TACTICAL_LABELS,
-                                )
-                                best_label = preds[0]["label"]
-                                confidence = round(preds[0]["score"] * 100, 1)
-
-                                # Stage 3 — Pinhole geometry: altitude estimate
-                                w_px = box.xywh[0][2].item()
-                                if w_px > 0:
-                                    distance_m = int(
-                                        (REAL_AIRCRAFT_SIZE_M * FOCAL_LENGTH_PX)
-                                        / w_px
-                                    )
-                                    telemetry.append(
-                                        f"[{best_label.upper()}]"
-                                        f" | CONF:{confidence}%"
-                                        f" | ALT:{distance_m}m"
-                                    )
-                            except Exception:
-                                pass
+                        # Overlay latest ML boxes onto the CURRENT frame
+                        frame = frame.copy()
+                        boxes, telemetry = state.read()
+                        if boxes:
+                            _draw_detections(frame, boxes)
 
                         _, buffer = cv2.imencode(
-                            ".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80]
+                            ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75]
                         )
                         img_b64 = base64.b64encode(buffer).decode("utf-8")
-
                         payload = json.dumps({"image": img_b64, "telemetry": telemetry})
                         await ws.send(payload)
-                        await asyncio.sleep(0.001)
+
+                        # ~30 FPS cap — keeps bandwidth reasonable
+                        await asyncio.sleep(1 / 30)
 
             except Exception as exc:
                 print(f"[WingID] ML engine connection dropped: {exc}. Retrying in 2s...")

@@ -1,8 +1,8 @@
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # WingID — .gitignore
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
-# ── Python ────────────────────────────────────────────────────
+# ── Python ────────────────────────────────────────────────────────────────────
 venv/
 .venv/
 env/
@@ -26,8 +26,9 @@ htmlcov/
 .coverage
 coverage.xml
 
-# ── ML Model Weights & Engines ────────────────────────────────
-# These are large binary files (50MB–500MB+) — do not commit
+# ── ML Model Weights & Engines ────────────────────────────────────────────────
+# These are large binary files (50 MB–500 MB+) — do not commit.
+# Mount via Docker volumes or allow ultralytics to auto-download on first run.
 *.pt
 *.pth
 *.ckpt
@@ -38,40 +39,45 @@ coverage.xml
 # HuggingFace model cache
 .cache/
 
-# ── Node / Frontend ───────────────────────────────────────────
+# ── Node / Frontend ───────────────────────────────────────────────────────────
 node_modules/
 frontend/dist/
 frontend/.vite/
 *.local
 
-# ── Environment & Secrets ─────────────────────────────────────
+# ── Environment & Secrets ─────────────────────────────────────────────────────
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
 
-# ── Logs ──────────────────────────────────────────────────────
+# ── Docker ────────────────────────────────────────────────────────────────────
+docker-compose.override.yml
+*.tar
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
 *.log
 logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+INSTALL.log
 
-# ── IDE / Editor ──────────────────────────────────────────────
+# ── IDE / Editor ──────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# ── OS ────────────────────────────────────────────────────────
+# ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 desktop.ini
 $RECYCLE.BIN/
 
-# ── Temporary / Output ────────────────────────────────────────
+# ── Temporary / Output ────────────────────────────────────────────────────────
 *.tmp
 *.bak
 *.orig

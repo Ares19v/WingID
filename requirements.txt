@@ -1,42 +1,44 @@
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # WingID — Python Dependencies
-# ─────────────────────────────────────────────────────────────
-# Install order matters:
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Install order:
 #   1. pip install -r requirements.txt
 #   2. pip install --pre torch torchvision torchaudio \
 #          --index-url https://download.pytorch.org/whl/nightly/cu128
 #
-# PyTorch is NOT listed here because the correct wheel depends
-# on your CUDA version. See README.md → Installation for details.
-# ─────────────────────────────────────────────────────────────
+# PyTorch is NOT listed here — the correct wheel depends on your CUDA version.
+# Run INSTALL.bat for a guided setup, or see README.md → Installation.
+# ─────────────────────────────────────────────────────────────────────────────
 
-# ── Web Framework ─────────────────────────────────────────────
+# ── Web Framework ─────────────────────────────────────────────────────────────
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
 websockets>=12.0
 
-# ── Computer Vision ───────────────────────────────────────────
+# ── Computer Vision ───────────────────────────────────────────────────────────
 opencv-python>=4.9.0
 
-# ── Machine Learning & Inference ──────────────────────────────
+# ── Machine Learning & Inference ──────────────────────────────────────────────
 ultralytics>=8.2.0          # YOLOv11 — downloads weights on first run
 transformers>=4.40.0        # HuggingFace CLIP zero-shot pipeline
 accelerate>=0.29.0          # Required by transformers pipeline on GPU
 
-# ── Image Processing ──────────────────────────────────────────
+# ── Image Processing ──────────────────────────────────────────────────────────
 Pillow>=10.3.0
 
-# ── Utilities ─────────────────────────────────────────────────
+# ── PDF Export ────────────────────────────────────────────────────────────────
+reportlab>=4.1.0            # Backend PDF generation (reserved for future server-side export)
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
 numpy>=1.26.0
 requests>=2.31.0            # Used internally by ultralytics for weight download
 tqdm>=4.66.0                # Progress bars (ultralytics dependency)
 pyyaml>=6.0.1               # ultralytics config parsing
 psutil>=5.9.0               # System resource monitoring
+python-multipart>=0.0.9     # Required by FastAPI for form data support
 
-# ── PDF Export (optional — for future Intel Dossier feature) ──
-# reportlab>=4.1.0
-
-# ── TensorRT (Windows only, install separately via pip) ────────
-# tensorrt is bundled with CUDA toolkit on Windows.
+# ── TensorRT (Windows only) ───────────────────────────────────────────────────
+# TensorRT is bundled with the CUDA toolkit on Windows.
 # If you need to install it explicitly:
-# pip install tensorrt --index-url https://pypi.nvidia.com
+#   pip install tensorrt --index-url https://pypi.nvidia.com

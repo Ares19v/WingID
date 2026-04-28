@@ -1,0 +1,74 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# WingID — Continuous Integration
+#
+# Runs on every push and pull request to `main`.
+#
+# Jobs:
+#   1. frontend  — ESLint + Vite production build
+#   2. backend   — flake8 static analysis
+#
+# NOTE: GPU inference is not tested in CI — GitHub-hosted runners have no
+# NVIDIA GPU. The pipeline validates code quality and build integrity only.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  # ── Frontend: lint + production build ─────────────────────────────────────
+  frontend:
+    name: Frontend — Lint & Build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      - name: Build (Vite)
+        run: npm run build
+
+  # ── Backend: static analysis ───────────────────────────────────────────────
+  backend:
+    name: Backend — Static Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install flake8
+        run: pip install flake8
+
+      - name: Lint (flake8)
+        run: |
+          flake8 backend/app/ \
+            --max-line-length=120 \
+            --extend-ignore=E501,W503,E402

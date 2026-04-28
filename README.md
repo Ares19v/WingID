@@ -3,12 +3,13 @@
 # 🛩️ WingID
 ### Real-Time Aerospace Target Detection & Telemetry Command Center
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
-[![PyTorch](https://img.shields.io/badge/PyTorch-Nightly-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)](https://pytorch.org)
-[![CUDA](https://img.shields.io/badge/CUDA-12.8-76B900?style=for-the-badge&logo=nvidia&logoColor=white)](https://developer.nvidia.com/cuda-toolkit)
-[![License](https://img.shields.io/badge/License-MIT-purple?style=for-the-badge)](LICENSE)
+[![CI](https://github.com/Ares19v/WingID/actions/workflows/ci.yml/badge.svg)](https://github.com/Ares19v/WingID/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.111%2B-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)
+[![PyTorch](https://img.shields.io/badge/PyTorch-Nightly-EE4C2C?style=flat-square&logo=pytorch&logoColor=white)](https://pytorch.org)
+[![CUDA](https://img.shields.io/badge/CUDA-12.8-76B900?style=flat-square&logo=nvidia&logoColor=white)](https://developer.nvidia.com/cuda-toolkit)
+[![License](https://img.shields.io/badge/License-MIT-8b5cf6?style=flat-square)](LICENSE)
 
 *A military-aesthetic, GPU-accelerated aircraft detection system that runs entirely on-device — no cloud, no APIs, no compromise.*
 
@@ -18,9 +19,9 @@
 
 ## 📌 What Is WingID?
 
-WingID is a **full-stack, real-time aerospace target identification platform** built for developers and researchers interested in applied computer vision on constrained hardware. It streams a live camera feed through a two-stage neural pipeline — first locking onto aircraft targets using a TensorRT-compiled **YOLOv11-Large** model, then performing **zero-shot optical classification** via a **HuggingFace CLIP** transformer to identify the exact aircraft designation (e.g., *F-22 Raptor*, *Boeing 737*, *MQ-9 Reaper*), and finally computing a rough **altitude/distance estimate** using pinhole camera geometry.
+WingID is a **full-stack, real-time aerospace target identification platform** built for developers and researchers interested in applied computer vision. It streams a live camera feed through a two-stage neural pipeline — first locking onto aircraft targets using a TensorRT-compiled **YOLOv11-Large** model, then performing **zero-shot optical classification** via a **HuggingFace CLIP** transformer to identify the exact aircraft designation (e.g., *F-22 Raptor*, *Boeing 737*, *MQ-9 Reaper*), and finally computing a rough **altitude/distance estimate** using pinhole camera geometry.
 
-The entire processing chain runs locally in a **Python/FastAPI daemon** and renders in a **React Command Center UI** over a WebSocket link — achieving near-zero UI latency without any browser media API overhead.
+The entire processing chain runs locally in a **Python/FastAPI daemon** and renders in a **React Command Center UI** over a WebSocket link — achieving near-zero UI latency without any cloud dependency.
 
 ---
 
@@ -28,18 +29,18 @@ The entire processing chain runs locally in a **Python/FastAPI daemon** and rend
 
 | Feature | Detail |
 |---|---|
-| 🎯 **YOLOv11-Large TensorRT Inference** | NVIDIA TensorRT `.engine` compiled model, 60 FPS on RTX GPUs |
-| 🧠 **Zero-Shot CLIP Classification** | HuggingFace `openai/clip-vit-base-patch32` — identifies 16 aircraft types without custom training data |
+| 🎯 **YOLOv11-Large TensorRT** | NVIDIA TensorRT `.engine` compiled model, 60 FPS on RTX GPUs |
+| 🧠 **Zero-Shot CLIP Classification** | `openai/clip-vit-base-patch32` — identifies 16 aircraft types without custom training data |
 | 📐 **Pinhole Altitude Estimation** | Real-time distance math using bounding box pixel width and known wingspan constants |
-| ⚡ **Dual WebSocket Pipeline** | Inverted producer/consumer WebSocket architecture — ML daemon pushes frames, frontend listens passively |
-| 🖥️ **Command Center UI** | JetBrains Mono terminal aesthetic with live telemetry logs, FPS counter, and feed toggle |
-| 🔴 **Live Feed Toggle** | Start / Terminate / Resume cam feed mid-session from the UI without restarting the backend |
-| 📄 **PDF Intel Dossier Export** *(in progress)* | One-click export of the session's combat log |
-| 🚀 **One-Click Launch** | Double-click `Run_WingID.bat` — both servers boot and Chrome opens automatically |
+| ⚡ **Dual WebSocket Pipeline** | Inverted producer/consumer architecture — ML daemon pushes frames, frontend listens passively |
+| 🖥️ **Command Center UI** | JetBrains Mono terminal aesthetic with live telemetry, FPS counter, and detection log |
+| 🔴 **Live Feed Toggle** | Start / Terminate / Resume cam feed mid-session without restarting the backend |
+| 📄 **PDF Intel Dossier Export** | One-click export of the full session detection log as a formatted PDF |
+| 🚀 **One-Click Launch** | `Run_WingID.bat` — pre-flight checks, both servers boot, Chrome opens automatically |
 
 ---
 
-## 🏗️ System Architecture (High Level)
+## 🏗️ System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -58,12 +59,12 @@ The entire processing chain runs locally in a **Python/FastAPI daemon** and rend
     │  OpenCV DirectShow → YOLOv11l.engine (TensorRT)   │
     │       ↓ Detected Aircraft Crop                     │
     │  CLIP Zero-Shot Classifier (HuggingFace)           │
-    │       ↓ Best Label + Altitude Estimate             │
+    │       ↓ Best Label + Confidence + Altitude         │
     │  ws_internal → FastAPI → ws → React Frontend       │
     └────────────────────────────────────────────────────┘
 ```
 
-For the full deep-dive, see **[TECHNICAL_DEEP_DIVE.md](TECHNICAL_DEEP_DIVE.md)**.
+For the full engineering breakdown, see **[TECHNICAL_DEEP_DIVE.md](TECHNICAL_DEEP_DIVE.md)** and **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
 ---
 
@@ -71,13 +72,15 @@ For the full deep-dive, see **[TECHNICAL_DEEP_DIVE.md](TECHNICAL_DEEP_DIVE.md)**
 
 | Layer | Technology |
 |---|---|
-| **Frontend** | React 19, Vite 8, WebSocket API, JetBrains Mono |
+| **Frontend** | React 19, Vite 8, WebSocket API, jsPDF, JetBrains Mono |
 | **Backend** | Python 3.10+, FastAPI, Uvicorn, WebSockets |
-| **Computer Vision** | OpenCV 4 (DirectShow, MJPG), YOLOv11-Large |
-| **ML Inference** | PyTorch (CUDA 12.8 Nightly), NVIDIA TensorRT |
+| **Computer Vision** | OpenCV 4 (DirectShow, MJPG) |
+| **ML Inference** | PyTorch (CUDA 12.8 Nightly), NVIDIA TensorRT, YOLOv11-Large |
 | **NLP / Zero-Shot** | HuggingFace Transformers, CLIP ViT-B/32 |
-| **Geometry** | Pinhole Camera Model (focal-length + wingspan math) |
+| **Geometry** | Pinhole Camera Model |
 | **IPC** | Python `multiprocessing`, dual WebSocket bus |
+| **Containerisation** | Docker, Docker Compose, Nginx |
+| **CI/CD** | GitHub Actions |
 
 ---
 
@@ -85,67 +88,64 @@ For the full deep-dive, see **[TECHNICAL_DEEP_DIVE.md](TECHNICAL_DEEP_DIVE.md)**
 
 > **Prerequisites:** Python 3.10+, Node.js 18+, Git, an NVIDIA GPU (RTX recommended)
 
-### Step 1 — Clone the repository
+### Option A — Automated (Recommended)
 
-```bash
-git clone https://github.com/yourusername/WingID.git
+```powershell
+git clone https://github.com/Ares19v/WingID.git
 cd WingID
 ```
 
-### Step 2 — Create the Python virtual environment
+Then double-click **`INSTALL.bat`** — it will:
+1. Create a Python virtual environment
+2. Install all Python dependencies
+3. Prompt you to select your CUDA version and install PyTorch
+4. Install frontend Node.js dependencies
+
+### Option B — Manual
 
 ```powershell
+# 1. Clone
+git clone https://github.com/Ares19v/WingID.git
+cd WingID
+
+# 2. Python virtual environment
 python -m venv venv
 .\venv\Scripts\Activate.ps1
-```
 
-### Step 3 — Install Python dependencies
-
-```powershell
-# Core dependencies
+# 3. Core Python dependencies
 pip install -r requirements.txt
 
-# PyTorch Nightly with CUDA 12.8 (RTX 5000 series / Blackwell SM_12.0)
+# 4. PyTorch with CUDA (select your GPU generation)
+# RTX 5000 series (Blackwell / CUDA 12.8 Nightly):
 pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
 
-# For RTX 30/40 series (CUDA 11.8 / 12.1), use the stable channel instead:
+# RTX 30/40 series (CUDA 12.1 Stable):
 # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# 5. Frontend dependencies
+cd frontend && npm install && cd ..
 ```
 
-### Step 4 — Install frontend dependencies
+### Launch
+
+Double-click **`Run_WingID.bat`** — both servers start and Chrome opens automatically.
+
+Or manually:
 
 ```powershell
-cd frontend
-npm install
-cd ..
-```
-
-### Step 5 — Download the YOLO model weights
-
-The YOLOv11-Large `.pt` weights are downloaded automatically by `ultralytics` on first run. To pre-download:
-
-```powershell
-python -c "from ultralytics import YOLO; YOLO('yolo11l.pt')"
-```
-
-> **TensorRT Engine**: On first run with an NVIDIA GPU, the system will auto-compile `yolo11l.pt` → `yolo11l.engine`. This takes **3–5 minutes** but only happens once. Subsequent launches use the cached `.engine` file directly.
-
-### Step 6 — Launch
-
-```powershell
-# Option A: Double-click Run_WingID.bat (opens Chrome automatically)
-
-# Option B: Manual
+# Terminal 1 — Backend
 .\venv\Scripts\Activate.ps1
 cd backend
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+uvicorn app.main:app --host 127.0.0.1 --port 8000
 
-# In a second terminal:
+# Terminal 2 — Frontend
 cd frontend
 npm run dev
 ```
 
 Then open **http://localhost:5173** and click **INITIALIZE SENSORS**.
+
+> **TensorRT Engine**: On first run with an NVIDIA GPU, the system auto-compiles `yolo11l.pt` → `yolo11l.engine`. This takes **3–5 minutes** but only happens once. Subsequent launches use the cached `.engine` directly.
 
 ---
 
@@ -155,46 +155,70 @@ Then open **http://localhost:5173** and click **INITIALIZE SENSORS**.
 WingID/
 ├── backend/
 │   ├── app/
-│   │   └── main.py            # FastAPI app, WebSocket server, ML engine process
-│   ├── yolo11l.pt             # YOLOv11-Large weights (auto-downloaded)
-│   ├── yolo11l.engine         # TensorRT compiled engine (auto-generated)
-│   └── requirements.txt       # Backend-only pip deps
+│   │   └── main.py              # FastAPI server, WebSocket bus, ML engine process
+│   ├── Dockerfile               # Backend container (NVIDIA GPU passthrough required)
+│   ├── .dockerignore
+│   ├── yolo11l.pt               # YOLOv11-Large weights (auto-downloaded, gitignored)
+│   ├── yolo11l.engine           # TensorRT compiled engine (auto-generated, gitignored)
+│   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx            # React Command Center UI
-│   │   ├── App.css
+│   │   ├── App.jsx              # React Command Center UI
 │   │   ├── main.jsx
 │   │   └── index.css
 │   ├── index.html
+│   ├── nginx.conf               # Nginx SPA config for container deployment
+│   ├── Dockerfile               # Multi-stage build → Nginx Alpine
+│   ├── .dockerignore
 │   ├── package.json
 │   └── vite.config.js
-├── venv/                      # Python virtual environment (gitignored)
-├── requirements.txt           # Root pip requirements
-├── Run_WingID.bat             # One-click launch script
-├── uninstall.bat              # Removes all heavy deps to free disk space
-├── TECHNICAL_DEEP_DIVE.md     # Full architecture + algorithm documentation
-├── ARCHITECTURE.md            # Architecture overview
+├── .github/
+│   └── workflows/
+│       └── ci.yml               # GitHub Actions: lint + build pipeline
+├── docker-compose.yml           # Full-stack container orchestration
+├── requirements.txt             # Root Python requirements
+├── Run_WingID.bat               # One-click local launcher
+├── INSTALL.bat                  # First-time setup script
+├── UNINSTALL.bat                # Space reclamation script
+├── .flake8                      # Python linter configuration
+├── ARCHITECTURE.md
+├── TECHNICAL_DEEP_DIVE.md
+├── SPACE_MANAGEMENT.md
 ├── .gitignore
 └── README.md
 ```
 
 ---
 
-## 🧹 Space Management (Laptop Friendly)
+## 🐳 Docker
 
-ML projects consume massive disk space. WingID ships with a dedicated **uninstall script** so you can wipe all heavy dependencies between sessions and reinstall when needed.
+> **Note:** Docker deployment requires the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) for GPU passthrough. Camera passthrough to Docker containers is Linux-native; Windows users should use `Run_WingID.bat` for local development.
 
-```powershell
-# To free disk space (keeps all source code intact)
-.\uninstall.bat
+```bash
+# Build and start all services
+docker compose up --build
 
-# To reinstall everything from scratch
-.\venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+# Backend only
+docker compose up --build backend
 ```
 
-See **[uninstall.bat](uninstall.bat)** and **[SPACE_MANAGEMENT.md](SPACE_MANAGEMENT.md)** for detailed guidance.
+The frontend will be served at `http://localhost:80` and the backend API at `http://localhost:8000`.
+
+---
+
+## 🧹 Space Management
+
+ML projects consume significant disk space. WingID ships with dedicated scripts:
+
+```powershell
+# Free disk space (keeps all source code)
+.\UNINSTALL.bat
+
+# Reinstall everything from scratch
+.\INSTALL.bat
+```
+
+See **[SPACE_MANAGEMENT.md](SPACE_MANAGEMENT.md)** for a full breakdown (~6–15 GB recoverable).
 
 ---
 
@@ -220,6 +244,8 @@ See **[uninstall.bat](uninstall.bat)** and **[SPACE_MANAGEMENT.md](SPACE_MANAGEM
 | `ws://localhost:8000/ws_internal` | WebSocket | Internal ML → FastAPI bridge |
 | `POST /start-feed` | HTTP | Resume frame broadcasting |
 | `POST /stop-feed` | HTTP | Pause frame broadcasting |
+| `GET /health` | HTTP | Health check (CI / monitoring) |
+| `GET /docs` | HTTP | Interactive API documentation (Swagger) |
 
 ---
 

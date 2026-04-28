@@ -1,0 +1,15 @@
+[flake8]
+max-line-length = 120
+extend-ignore =
+    # E501 — line too long (handled by max-line-length)
+    E501,
+    # W503 — line break before binary operator (conflicts with Black)
+    W503,
+    # E402 — module level import not at top (intentional in run_ai_eye subprocess)
+    E402
+exclude =
+    venv,
+    .venv,
+    __pycache__,
+    .git,
+    node_modules

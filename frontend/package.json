@@ -1,7 +1,7 @@
 {
   "name": "wing-id",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "jspdf": "^2.5.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },

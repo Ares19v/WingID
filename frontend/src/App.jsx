@@ -1,182 +1,346 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { jsPDF } from 'jspdf';
 
-const colors = {
-  baseWhite: '#f5f5f5',
-  lightGrey: '#737373',
-  darkGrey: '#262626',
-  black: '#0a0a0a',
-  uiAccent: '#a3a3a3',
-  danger: '#ef4444',
-  dangerDim: '#7f1d1d',
+// ─── Design tokens ─────────────────────────────────────────────────────────
+const C = {
+  black:      '#0a0a0a',
+  darkGrey:   '#1a1a1a',
+  panelGrey:  '#141414',
+  midGrey:    '#262626',
+  lightGrey:  '#737373',
+  uiAccent:   '#a3a3a3',
+  white:      '#f5f5f5',
+  green:      '#22c55e',
+  greenDim:   '#14532d',
+  danger:     '#ef4444',
+  dangerDim:  '#7f1d1d',
+  amber:      '#f59e0b',
+  amberDim:   '#78350f',
+  cyan:       '#22d3ee',
 };
 
+const FONT = "'JetBrains Mono', monospace";
+const MAX_LOGS = 500;
+const WS_URL  = 'ws://127.0.0.1:8000/ws';
+const API_URL = 'http://127.0.0.1:8000';
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+function useSessionTimer(running) {
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef(null);
+
+  useEffect(() => {
+    if (running) {
+      startRef.current = Date.now() - elapsed * 1000;
+      const id = setInterval(
+        () => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)),
+        1000
+      );
+      return () => clearInterval(id);
+    }
+  }, [running]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fmt = (s) => {
+    const h = String(Math.floor(s / 3600)).padStart(2, '0');
+    const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+    const sec = String(s % 60).padStart(2, '0');
+    return `${h}:${m}:${sec}`;
+  };
+
+  return fmt(elapsed);
+}
+
+// ─── Main component ─────────────────────────────────────────────────────────
 function App() {
   const [isSystemStarted, setIsSystemStarted] = useState(false);
-  const [isFeedActive, setIsFeedActive] = useState(false);
-  const [telemetry, setTelemetry] = useState([]);
-  const [fullLogs, setFullLogs] = useState([]);
-  const [fps, setFps] = useState(0);
-  const [isConnected, setIsConnected] = useState(false);
+  const [isFeedActive,    setIsFeedActive]    = useState(false);
+  const [telemetry,       setTelemetry]       = useState([]);
+  const [fullLogs,        setFullLogs]        = useState([]);
+  const [fps,             setFps]             = useState(0);
+  const [isConnected,     setIsConnected]     = useState(false);
+  const [detectionCount,  setDetectionCount]  = useState(0);
 
   const displayImageRef = useRef(null);
-  const lastFrameTime = useRef(Date.now());
+  const lastFrameTime   = useRef(null); // initialised on first frame to avoid Date.now() in render
+  const sessionTime     = useSessionTimer(isSystemStarted);
 
+  // ── WebSocket lifecycle ──────────────────────────────────────────────────
   useEffect(() => {
     if (!isSystemStarted) return;
 
-    const ws = new WebSocket('ws://127.0.0.1:8000/ws');
+    const ws = new WebSocket(WS_URL);
 
-    ws.onopen = () => setIsConnected(true);
+    ws.onopen  = () => setIsConnected(true);
     ws.onclose = () => setIsConnected(false);
+    ws.onerror = () => setIsConnected(false);
 
     ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
+      let data;
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        return; // Discard malformed frames
+      }
 
+      // Update live video feed via direct DOM mutation (bypasses React reconciler)
       if (data.image && displayImageRef.current) {
         displayImageRef.current.src = 'data:image/jpeg;base64,' + data.image;
       }
 
-      if (data.telemetry && data.telemetry.length > 0) {
-        setTelemetry(prev => [...new Set([...data.telemetry, ...prev])].slice(0, 10));
+      // Update FPS counter
+      const now = Date.now();
+      if (lastFrameTime.current !== null) {
+        setFps(Math.round(1000 / (now - lastFrameTime.current)));
+      }
+      lastFrameTime.current = now;
 
-        const time = new Date().toLocaleTimeString();
-        data.telemetry.forEach(d => {
-          setFullLogs(prev => {
-            const entry = `[${time}] | ${d}`;
-            return prev.includes(entry) ? prev : [entry, ...prev];
-          });
+      // Update telemetry sidebar + persistent log
+      if (data.telemetry && data.telemetry.length > 0) {
+        setDetectionCount((c) => c + data.telemetry.length);
+
+        setTelemetry((prev) =>
+          [...new Set([...data.telemetry, ...prev])].slice(0, 10)
+        );
+
+        const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+        setFullLogs((prev) => {
+          const newEntries = data.telemetry.map((d) => `[${timestamp}] ${d}`);
+          // Deduplicate and cap at MAX_LOGS entries to prevent memory growth
+          const merged = [...newEntries, ...prev];
+          const unique = [...new Set(merged)];
+          return unique.slice(0, MAX_LOGS);
         });
       }
-
-      const now = Date.now();
-      setFps(Math.round(1000 / (now - lastFrameTime.current)));
-      lastFrameTime.current = now;
     };
 
     return () => ws.close();
   }, [isSystemStarted]);
 
-  const handleInitialize = async () => {
+  // ── Control handlers ────────────────────────────────────────────────────
+  const handleInitialize = useCallback(async () => {
     setIsSystemStarted(true);
     setIsFeedActive(true);
-    await fetch('http://127.0.0.1:8000/start-feed', { method: 'POST' }).catch(() => {});
-  };
+    await fetch(`${API_URL}/start-feed`, { method: 'POST' }).catch(() => {});
+  }, []);
 
-  const handleToggleFeed = async () => {
+  const handleToggleFeed = useCallback(async () => {
     if (isFeedActive) {
-      await fetch('http://127.0.0.1:8000/stop-feed', { method: 'POST' }).catch(() => {});
+      await fetch(`${API_URL}/stop-feed`, { method: 'POST' }).catch(() => {});
       setIsFeedActive(false);
     } else {
-      await fetch('http://127.0.0.1:8000/start-feed', { method: 'POST' }).catch(() => {});
+      await fetch(`${API_URL}/start-feed`, { method: 'POST' }).catch(() => {});
       setIsFeedActive(true);
     }
-  };
+  }, [isFeedActive]);
 
+  const handleExportPDF = useCallback(() => {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const margin = 15;
+    const lineH  = 6;
+    let y = margin;
+
+    // ── Header ──
+    doc.setFont('courier', 'bold');
+    doc.setFontSize(16);
+    doc.setTextColor(30, 30, 30);
+    doc.text('WINGID // INTEL DOSSIER', margin, y);
+    y += 8;
+
+    doc.setFontSize(9);
+    doc.setFont('courier', 'normal');
+    doc.setTextColor(100, 100, 100);
+    doc.text(
+      `Generated: ${new Date().toUTCString()}  |  Session: ${sessionTime}  |  Detections: ${detectionCount}`,
+      margin, y
+    );
+    y += 4;
+    doc.setDrawColor(60, 60, 60);
+    doc.line(margin, y, pageW - margin, y);
+    y += 8;
+
+    // ── Log entries ──
+    doc.setFont('courier', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(20, 20, 20);
+
+    if (fullLogs.length === 0) {
+      doc.text('No detections recorded this session.', margin, y);
+    } else {
+      fullLogs.forEach((entry) => {
+        if (y > 280) {
+          doc.addPage();
+          y = margin;
+        }
+        doc.text(entry, margin, y);
+        y += lineH;
+      });
+    }
+
+    // ── Footer ──
+    const totalPages = doc.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFontSize(7);
+      doc.setTextColor(150, 150, 150);
+      doc.text(
+        `WingID Intel Dossier  |  Page ${i} of ${totalPages}`,
+        margin,
+        doc.internal.pageSize.getHeight() - 8
+      );
+    }
+
+    doc.save(`wingid_intel_${Date.now()}.pdf`);
+  }, [fullLogs, detectionCount, sessionTime]);
+
+  // ── Derived state ────────────────────────────────────────────────────────
   const trackerStatus = !isSystemStarted
     ? 'STANDBY'
     : isFeedActive
     ? 'TRACKING_ACTIVE'
     : 'FEED_SUSPENDED';
 
+  const statusColor = !isSystemStarted
+    ? C.lightGrey
+    : isFeedActive && isConnected
+    ? C.green
+    : C.amber;
+
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <div
-      style={{
-        backgroundColor: colors.black,
-        backgroundImage: `linear-gradient(45deg, #121212 25%, transparent 25%, transparent 75%, #121212 75%, #121212), linear-gradient(45deg, #121212 25%, transparent 25%, transparent 75%, #121212 75%, #121212)`,
-        backgroundSize: '40px 40px',
-        backgroundPosition: '0 0, 20px 20px',
-        height: '100vh',
-        width: '100vw',
-        padding: '24px',
-        boxSizing: 'border-box',
-        color: colors.baseWhite,
-        fontFamily: "'JetBrains Mono', monospace",
-        display: 'flex',
-        flexDirection: 'column',
-      }}
-    >
+    <div style={{
+      backgroundColor: C.black,
+      backgroundImage: `
+        linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px)
+      `,
+      backgroundSize: '40px 40px',
+      height: '100vh',
+      width: '100vw',
+      padding: '20px',
+      boxSizing: 'border-box',
+      color: C.white,
+      fontFamily: FONT,
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '16px',
+    }}>
+
       {/* ── Header ── */}
-      <header
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          borderBottom: `4px solid ${colors.lightGrey}`,
-          backgroundColor: colors.black,
-          padding: '16px',
-          marginBottom: '24px',
-        }}
-      >
-        <div style={{ fontWeight: '900', letterSpacing: '4px', fontSize: '20px', color: colors.baseWhite }}>
-          WINGID_TELEMETRY //<span style={{ color: colors.lightGrey }}> MIL_SPEC</span>
-        </div>
-        <div style={{ display: 'flex', gap: '20px', fontSize: '13px', fontWeight: 'bold' }}>
-          <span style={{ color: colors.lightGrey }}>CHASSIS: SM_12.0</span>
-          <span style={{ color: isConnected ? colors.baseWhite : colors.lightGrey }}>
-            {isConnected ? '● DATALINK_SECURED' : '● SECURE_LINK_LOST'}
+      <header style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        borderBottom: `1px solid ${C.midGrey}`,
+        paddingBottom: '14px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <span style={{ fontWeight: 900, letterSpacing: '6px', fontSize: '18px', color: C.white }}>
+            WINGID
           </span>
-          <span style={{ color: colors.baseWhite }}>FPS: {fps}</span>
+          <span style={{ color: C.lightGrey, fontSize: '11px', letterSpacing: '2px' }}>
+            // AEROSPACE TELEMETRY COMMAND CENTER
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: '24px', fontSize: '11px', fontWeight: 'bold', alignItems: 'center' }}>
+          <span style={{ color: C.lightGrey }}>SESSION {sessionTime}</span>
+          <span style={{ color: C.lightGrey }}>DET: {detectionCount}</span>
+          <span style={{ color: C.lightGrey }}>FPS: <span style={{ color: C.white }}>{fps}</span></span>
+          <span style={{
+            display: 'flex', alignItems: 'center', gap: '6px',
+            color: isConnected ? C.green : C.danger,
+          }}>
+            <span style={{
+              width: '7px', height: '7px', borderRadius: '50%',
+              backgroundColor: isConnected ? C.green : C.danger,
+              boxShadow: isConnected ? `0 0 6px ${C.green}` : 'none',
+              display: 'inline-block',
+            }} />
+            {isConnected ? 'DATALINK_SECURED' : 'LINK_LOST'}
+          </span>
         </div>
       </header>
 
-      {/* ── Main Grid ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: '24px', flex: 1, minHeight: 0 }}>
+      {/* ── Main grid ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: '16px', flex: 1, minHeight: 0 }}>
 
-        {/* ── Vision Panel ── */}
-        <div style={{ border: `4px solid ${colors.darkGrey}`, backgroundColor: colors.black, display: 'flex', flexDirection: 'column' }}>
-
+        {/* ── Vision panel ── */}
+        <div style={{
+          border: `1px solid ${C.midGrey}`,
+          backgroundColor: C.panelGrey,
+          display: 'flex',
+          flexDirection: 'column',
+          borderRadius: '4px',
+          overflow: 'hidden',
+        }}>
           {/* Panel header */}
-          <div
-            style={{
-              padding: '12px 16px',
-              borderBottom: `4px solid ${colors.darkGrey}`,
-              fontSize: '13px',
-              color: colors.baseWhite,
-              backgroundColor: colors.darkGrey,
-              display: 'flex',
-              justifyContent: 'space-between',
-              fontWeight: '900',
-              letterSpacing: '1px',
-            }}
-          >
-            <span>AEROSPACE_VISION_TRACKER</span>
-            <span style={{ color: isFeedActive && isConnected ? colors.uiAccent : colors.lightGrey }}>
-              {trackerStatus}
-            </span>
+          <div style={{
+            padding: '10px 14px',
+            borderBottom: `1px solid ${C.midGrey}`,
+            fontSize: '11px',
+            fontWeight: 900,
+            letterSpacing: '2px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            backgroundColor: C.darkGrey,
+          }}>
+            <span style={{ color: C.uiAccent }}>AEROSPACE_VISION_TRACKER</span>
+            <span style={{ color: statusColor, fontSize: '10px' }}>● {trackerStatus}</span>
           </div>
 
           {/* Feed area */}
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
+          <div style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            position: 'relative',
+            overflow: 'hidden',
+            backgroundColor: '#050505',
+          }}>
             {!isSystemStarted ? (
-              <button
-                id="btn-initialize"
-                onClick={handleInitialize}
-                style={{
-                  padding: '20px 50px',
-                  backgroundColor: colors.lightGrey,
-                  border: `2px solid ${colors.baseWhite}`,
-                  color: colors.black,
-                  fontSize: '20px',
-                  cursor: 'pointer',
-                  fontWeight: '900',
-                  letterSpacing: '2px',
-                  fontFamily: 'inherit',
-                  textTransform: 'uppercase',
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.backgroundColor = colors.baseWhite; }}
-                onMouseLeave={e => { e.currentTarget.style.backgroundColor = colors.lightGrey; }}
-              >
-                INITIALIZE SENSORS
-              </button>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ color: C.lightGrey, fontSize: '11px', letterSpacing: '3px', marginBottom: '24px' }}>
+                  SYSTEM STANDBY — SENSORS OFFLINE
+                </div>
+                <button
+                  id="btn-initialize"
+                  onClick={handleInitialize}
+                  style={{
+                    padding: '16px 48px',
+                    backgroundColor: 'transparent',
+                    border: `1px solid ${C.white}`,
+                    color: C.white,
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    fontWeight: 900,
+                    letterSpacing: '4px',
+                    fontFamily: FONT,
+                    textTransform: 'uppercase',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = C.white;
+                    e.currentTarget.style.color = C.black;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                    e.currentTarget.style.color = C.white;
+                  }}
+                >
+                  INITIALIZE SENSORS
+                </button>
+              </div>
             ) : (
               <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column' }}>
                 {!isConnected && (
-                  <div style={{ color: colors.lightGrey, fontSize: '18px', fontWeight: 'bold', letterSpacing: '2px', textAlign: 'center' }}>
-                    WAITING FOR SYSTEM HANDSHAKE...
+                  <div style={{ color: C.amber, fontSize: '13px', fontWeight: 'bold', letterSpacing: '3px', textAlign: 'center' }}>
+                    ◌ WAITING FOR SYSTEM HANDSHAKE...
                   </div>
                 )}
                 {isConnected && !isFeedActive && (
-                  <div style={{ color: colors.lightGrey, fontSize: '20px', fontWeight: 'bold', letterSpacing: '2px', textAlign: 'center' }}>
+                  <div style={{ color: C.lightGrey, fontSize: '14px', fontWeight: 'bold', letterSpacing: '3px', textAlign: 'center' }}>
                     ⏸ FEED SUSPENDED
                   </div>
                 )}
@@ -186,96 +350,164 @@ function App() {
                     width: '100%',
                     height: '100%',
                     objectFit: 'contain',
-                    zIndex: 10,
                     display: isConnected && isFeedActive ? 'block' : 'none',
                   }}
-                  alt=""
+                  alt="Live aerospace tracking feed"
                 />
               </div>
             )}
           </div>
 
-          {/* ── Toggle Feed Button ── */}
+          {/* Toggle feed button */}
           {isSystemStarted && (
-            <div style={{ borderTop: `4px solid ${colors.darkGrey}`, padding: '12px 16px' }}>
+            <div style={{ borderTop: `1px solid ${C.midGrey}`, padding: '10px 14px', backgroundColor: C.darkGrey }}>
               <button
                 id="btn-toggle-feed"
                 onClick={handleToggleFeed}
                 style={{
                   width: '100%',
-                  padding: '14px',
-                  backgroundColor: isFeedActive ? colors.dangerDim : colors.darkGrey,
-                  border: `2px solid ${isFeedActive ? colors.danger : colors.lightGrey}`,
-                  color: isFeedActive ? colors.danger : colors.baseWhite,
+                  padding: '12px',
+                  backgroundColor: isFeedActive ? C.dangerDim : C.greenDim,
+                  border: `1px solid ${isFeedActive ? C.danger : C.green}`,
+                  color: isFeedActive ? C.danger : C.green,
                   cursor: 'pointer',
-                  fontSize: '15px',
-                  fontWeight: '900',
-                  letterSpacing: '2px',
-                  fontFamily: 'inherit',
-                  transition: 'all 0.2s',
+                  fontSize: '12px',
+                  fontWeight: 900,
+                  letterSpacing: '3px',
+                  fontFamily: FONT,
+                  transition: 'all 0.15s ease',
+                  borderRadius: '2px',
                 }}
-                onMouseEnter={e => { e.currentTarget.style.opacity = '0.8'; }}
-                onMouseLeave={e => { e.currentTarget.style.opacity = '1'; }}
+                onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.75'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
               >
-                {isFeedActive ? '■ TERMINATE FEED' : '▶ RESUME FEED'}
+                {isFeedActive ? '■  TERMINATE FEED' : '▶  RESUME FEED'}
               </button>
             </div>
           )}
         </div>
 
-        {/* ── Combat Logs Panel ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div style={{ fontSize: '14px', color: colors.baseWhite, marginBottom: '8px', fontWeight: '900', letterSpacing: '2px', backgroundColor: colors.black, padding: '8px' }}>
-              // COMBAT_LOGS
+        {/* ── Right sidebar ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', minHeight: 0 }}>
+
+          {/* Live detections */}
+          <div style={{
+            border: `1px solid ${C.midGrey}`,
+            backgroundColor: C.panelGrey,
+            display: 'flex',
+            flexDirection: 'column',
+            flex: '0 0 auto',
+            borderRadius: '4px',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              padding: '10px 14px',
+              borderBottom: `1px solid ${C.midGrey}`,
+              fontSize: '11px',
+              fontWeight: 900,
+              letterSpacing: '2px',
+              color: C.uiAccent,
+              backgroundColor: C.darkGrey,
+            }}>
+              LIVE_DETECTIONS
             </div>
-            <div
-              style={{
-                border: `4px solid ${colors.darkGrey}`,
-                backgroundColor: 'rgba(10, 10, 10, 0.9)',
-                flex: 1,
-                padding: '16px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '12px',
-                overflowY: 'auto',
-                fontSize: '12px',
-                fontWeight: 'bold',
-              }}
-            >
-              {telemetry.length === 0 && <span style={{ color: colors.lightGrey }}>SCANNING HORIZON...</span>}
-              {telemetry.map((d, i) => (
-                <div
-                  key={i}
-                  style={{
-                    color: colors.baseWhite,
-                    borderLeft: `4px solid ${colors.lightGrey}`,
-                    backgroundColor: colors.darkGrey,
-                    padding: '8px',
-                  }}
-                >
-                  | {d}
-                </div>
-              ))}
+            <div style={{
+              padding: '12px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              maxHeight: '200px',
+              overflowY: 'auto',
+              fontSize: '10px',
+            }}>
+              {telemetry.length === 0 ? (
+                <span style={{ color: C.lightGrey, letterSpacing: '1px' }}>SCANNING HORIZON...</span>
+              ) : (
+                telemetry.map((d, i) => (
+                  <div key={i} style={{
+                    color: C.cyan,
+                    borderLeft: `2px solid ${C.cyan}`,
+                    backgroundColor: 'rgba(34,211,238,0.05)',
+                    padding: '6px 8px',
+                    borderRadius: '2px',
+                    fontWeight: 'bold',
+                    lineHeight: '1.4',
+                  }}>
+                    {d}
+                  </div>
+                ))
+              )}
             </div>
-            <button
-              onClick={() => {}}
-              style={{
-                marginTop: '16px',
-                padding: '18px',
-                backgroundColor: colors.darkGrey,
-                border: `2px solid ${colors.lightGrey}`,
-                color: colors.baseWhite,
-                cursor: 'pointer',
-                fontSize: '16px',
-                fontWeight: '900',
-                letterSpacing: '1px',
-                fontFamily: 'inherit',
-              }}
-            >
-              [↓] DUMP TRACKING INTEL
-            </button>
           </div>
+
+          {/* Combat log */}
+          <div style={{
+            border: `1px solid ${C.midGrey}`,
+            backgroundColor: C.panelGrey,
+            display: 'flex',
+            flexDirection: 'column',
+            flex: 1,
+            minHeight: 0,
+            borderRadius: '4px',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              padding: '10px 14px',
+              borderBottom: `1px solid ${C.midGrey}`,
+              fontSize: '11px',
+              fontWeight: 900,
+              letterSpacing: '2px',
+              color: C.uiAccent,
+              backgroundColor: C.darkGrey,
+              display: 'flex',
+              justifyContent: 'space-between',
+            }}>
+              <span>COMBAT_LOG</span>
+              <span style={{ color: C.lightGrey, fontSize: '10px' }}>{fullLogs.length}/{MAX_LOGS}</span>
+            </div>
+            <div style={{
+              flex: 1,
+              overflowY: 'auto',
+              padding: '12px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '4px',
+            }}>
+              {fullLogs.length === 0 ? (
+                <span style={{ color: C.lightGrey, fontSize: '10px' }}>No events logged yet.</span>
+              ) : (
+                fullLogs.map((entry, i) => (
+                  <div key={i} style={{ fontSize: '9px', color: C.lightGrey, lineHeight: '1.6', fontFamily: FONT }}>
+                    {entry}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Export button */}
+          <button
+            id="btn-export-intel"
+            onClick={handleExportPDF}
+            disabled={fullLogs.length === 0}
+            style={{
+              padding: '14px',
+              backgroundColor: fullLogs.length > 0 ? C.midGrey : C.darkGrey,
+              border: `1px solid ${fullLogs.length > 0 ? C.uiAccent : C.midGrey}`,
+              color: fullLogs.length > 0 ? C.white : C.lightGrey,
+              cursor: fullLogs.length > 0 ? 'pointer' : 'not-allowed',
+              fontSize: '11px',
+              fontWeight: 900,
+              letterSpacing: '2px',
+              fontFamily: FONT,
+              borderRadius: '2px',
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={(e) => { if (fullLogs.length > 0) e.currentTarget.style.backgroundColor = C.lightGrey; }}
+            onMouseLeave={(e) => { if (fullLogs.length > 0) e.currentTarget.style.backgroundColor = C.midGrey; }}
+          >
+            ↓  DUMP TRACKING INTEL
+          </button>
         </div>
       </div>
     </div>

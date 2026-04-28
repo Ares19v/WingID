@@ -1,0 +1,20 @@
+# Backend build context excludes large binaries and dev artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.log
+
+# ML model weights — mount via volumes at runtime
+*.pt
+*.pth
+*.engine
+*.onnx
+*.trt
+
+# HuggingFace cache
+.cache/

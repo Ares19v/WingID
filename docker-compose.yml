@@ -1,0 +1,66 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# WingID — Docker Compose
+#
+# Prerequisites:
+#   • Docker Desktop with the Compose plugin
+#   • NVIDIA Container Toolkit for GPU passthrough (backend)
+#     Install: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+#
+# Usage:
+#   docker compose up --build          # Build + start all services
+#   docker compose up --build backend  # Backend only
+#   docker compose down                # Stop all
+#
+# IMPORTANT — Camera access:
+#   USB camera passthrough to Docker containers requires either:
+#   a) Linux host: add `devices: [/dev/video0:/dev/video0]` under backend
+#   b) Windows/WSL2: use the native Run_WingID.bat launcher instead
+#
+# The docker-compose setup is primarily for CI validation and headless deployments.
+# For local development with a physical camera, use Run_WingID.bat.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── FastAPI ML backend ────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: wingid-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount model weights from host — they are gitignored and not bundled
+      - ./backend/yolo11l.pt:/app/yolo11l.pt:ro
+      - ./backend/yolo11l.engine:/app/yolo11l.engine:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    # ── GPU passthrough (NVIDIA Container Toolkit required) ────────────────
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ── React / Nginx frontend ────────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: wingid-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy

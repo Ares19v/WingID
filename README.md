@@ -3,7 +3,7 @@
 # 🛩️ WingID
 ### Real-Time Aerospace Target Detection & Telemetry Command Center
 
-[![CI](https://github.com/Ares19v/WingID/actions/workflows/ci.yml/badge.svg)](https://github.com/Ares19v/WingID/actions/workflows/ci.yml)
+[![CI](https://github.com/Ares19v/WingID/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Ares19v/WingID/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111%2B-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)

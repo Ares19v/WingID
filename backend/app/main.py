@@ -23,11 +23,11 @@ from fastapi.responses import JSONResponse
 
 app = FastAPI(title="WingID API", version="1.0.0")
 
+# Wildcard is intentional — WingID is a local-only tool with no network exposure.
 app.add_middleware(
     CORSMiddleware,
-    # Restrict to localhost in production; wildcard is fine for a local-only tool
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["GET", "POST"],
+    allow_origins=["*"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -36,9 +36,9 @@ app.add_middleware(
 #
 # IMPORTANT (Windows): Python uses the "spawn" start method on Windows, so
 # child processes receive a *fresh* copy of every module-level variable.
-# We initialise streaming_active here and pass it explicitly as an argument
-# to the child process so both processes reference the same shared-memory
-# segment rather than independent copies.
+# We initialise streaming_active in startup_event() and pass it explicitly
+# as an argument to the child process so both processes reference the SAME
+# shared-memory segment rather than independent copies.
 # ---------------------------------------------------------------------------
 
 streaming_active: multiprocessing.Value  # initialised in startup_event
@@ -53,17 +53,18 @@ class ConnectionManager:
 
     def __init__(self) -> None:
         self.active_connections: list[WebSocket] = []
-        self._lock = asyncio.Lock()
+        # NOTE: No asyncio.Lock here — creating asyncio primitives at module
+        # level (before any event loop runs) is deprecated in Python 3.10+.
+        # This manager is only used from within a single uvicorn event loop,
+        # so plain list operations are safe.
 
     async def connect(self, websocket: WebSocket) -> None:
         await websocket.accept()
-        async with self._lock:
-            self.active_connections.append(websocket)
+        self.active_connections.append(websocket)
 
-    async def disconnect(self, websocket: WebSocket) -> None:
-        async with self._lock:
-            if websocket in self.active_connections:
-                self.active_connections.remove(websocket)
+    def disconnect(self, websocket: WebSocket) -> None:
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
 
     async def broadcast(self, message: str) -> None:
         """Send *message* to every connected client; silently drop dead ones."""
@@ -73,11 +74,8 @@ class ConnectionManager:
                 await connection.send_text(message)
             except Exception:
                 dead.append(connection)
-        # Clean up dead connections outside the send loop
-        async with self._lock:
-            for conn in dead:
-                if conn in self.active_connections:
-                    self.active_connections.remove(conn)
+        for conn in dead:
+            self.disconnect(conn)
 
 
 manager = ConnectionManager()
@@ -94,7 +92,7 @@ class VideoStream:
     """
 
     def __init__(self, camera_index: int = 0) -> None:
-        # DirectShow reduces latency vs MSMF; MJPG cuts USB bandwidth ~10×
+        # DirectShow reduces latency vs MSMF; MJPG cuts USB bandwidth ~10x
         self.cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
         self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         self.cap.set(cv2.CAP_PROP_FPS, 60)
@@ -158,18 +156,18 @@ def run_ai_eye(shared_streaming_active: multiprocessing.Value) -> None:
     Windows spawn).
     """
     import time
-
+    import websockets as ws_lib
     import PIL.Image
-    import websockets  # noqa: F401 (imported here to avoid loading in parent)
     from ultralytics import YOLO
     from transformers import pipeline as hf_pipeline
 
-    print("[WingID] Loading TensorRT detection model...")
+    print("[WingID] Loading detection model...")
     engine_path = os.path.join(os.path.dirname(__file__), "..", "yolo11l.engine")
     pt_path = os.path.join(os.path.dirname(__file__), "..", "yolo11l.pt")
 
-    # Prefer compiled TensorRT engine; fall back to .pt for non-NVIDIA hosts
+    # Prefer compiled TensorRT engine; fall back to .pt if engine not present
     model_path = engine_path if os.path.exists(engine_path) else pt_path
+    print(f"[WingID] Using model: {os.path.basename(model_path)}")
     model = YOLO(model_path, task="detect")
 
     print("[WingID] Loading CLIP zero-shot classifier...")
@@ -183,9 +181,8 @@ def run_ai_eye(shared_streaming_active: multiprocessing.Value) -> None:
     stream = VideoStream().start()
 
     async def process_stream() -> None:
-        import websockets as ws_lib
-
-        time.sleep(3)  # Wait for FastAPI server to be ready
+        # Use asyncio.sleep (non-blocking) instead of time.sleep (blocks event loop)
+        await asyncio.sleep(3)  # Wait for FastAPI server to be ready
         while True:
             try:
                 async with ws_lib.connect(
@@ -262,7 +259,7 @@ def run_ai_eye(shared_streaming_active: multiprocessing.Value) -> None:
 
             except Exception as exc:
                 print(f"[WingID] ML engine connection dropped: {exc}. Retrying in 2s...")
-                time.sleep(2)
+                await asyncio.sleep(2)
 
     asyncio.run(process_stream())
 
@@ -277,12 +274,11 @@ async def websocket_frontend(websocket: WebSocket) -> None:
     await manager.connect(websocket)
     try:
         while True:
-            # Keep connection alive; frontend only listens (no upstream data)
             await websocket.receive_text()
     except WebSocketDisconnect:
-        await manager.disconnect(websocket)
+        manager.disconnect(websocket)
     except Exception:
-        await manager.disconnect(websocket)
+        manager.disconnect(websocket)
 
 
 @app.websocket("/ws_internal")

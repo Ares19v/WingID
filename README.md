@@ -258,3 +258,8 @@ MIT License — see [LICENSE](LICENSE) for details.
 <div align="center">
 Built with PyTorch · FastAPI · React · NVIDIA TensorRT
 </div>
+
+---
+<p align="center">
+  Made by Devansh Tyagi @ 2026
+</p>

@@ -38,6 +38,7 @@ coverage.xml
 *.plan
 # HuggingFace model cache
 .cache/
+test_cache/
 
 # ── Node / Frontend ───────────────────────────────────────────────────────────
 node_modules/

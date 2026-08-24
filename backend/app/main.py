@@ -119,7 +119,10 @@ class VideoStream:
 # ML inference constants
 # ---------------------------------------------------------------------------
 
-REAL_AIRCRAFT_SIZE_M: float = 35.0   # Average commercial wingspan (metres)
+# ---------------------------------------------------------------------------
+# ML inference constants & Wingspan Matrix
+# ---------------------------------------------------------------------------
+
 FOCAL_LENGTH_PX: float = 800.0       # Typical 1080p webcam approximation
 
 TACTICAL_LABELS: list[str] = [
@@ -140,6 +143,28 @@ TACTICAL_LABELS: list[str] = [
     "Civilian Cessna Propeller Plane",
     "Private Business Jet Aircraft",
 ]
+
+# Physical wingspan / rotor diameter lookup table (in metres) for pinhole geometry
+AIRCRAFT_WINGSPAN_M: dict[str, float] = {
+    "B-2 Spirit Stealth Bomber": 52.4,
+    "Boeing 747 Jumbo Jet": 68.4,
+    "Airbus A380 Commercial Jet": 79.8,
+    "C-130 Hercules Military Transport Plane": 40.4,
+    "Boeing 737 Commercial Passenger Jet": 35.8,
+    "Private Business Jet Aircraft": 28.5,
+    "A-10 Warthog Ground Attack Aircraft with cannons and missiles": 17.5,
+    "F-15 Eagle Strike Fighter": 13.1,
+    "F-22 Raptor Stealth Fighter Jet": 13.6,
+    "F-35 Lightning II Stealth Fighter": 10.7,
+    "F-16 Fighting Falcon Military Jet": 9.96,
+    "F/A-18 Hornet Navy Fighter Jet": 12.3,
+    "MQ-9 Reaper Military Drone UAV with hellfires": 20.1,
+    "Civilian Cessna Propeller Plane": 11.0,
+    "AH-64 Apache Attack Helicopter with missiles and guns": 14.6,
+    "UH-60 Black Hawk Military Transport Helicopter": 16.4,
+}
+
+CLIP_PROMPT_TEMPLATE: str = "a military or civil aviation photograph of a {}."
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +245,7 @@ def _inference_worker(
             continue
 
         try:
-            results = model(frame, conf=0.85, verbose=False,
+            results = model(frame, conf=0.65, verbose=False,
                             device=device, classes=[4])
             boxes: list[tuple] = []
             telemetry: list[str] = []
@@ -235,16 +260,21 @@ def _inference_worker(
                     if crop.size == 0:
                         continue
 
-                    # Stage 2 — CLIP zero-shot classification
+                    # Stage 2 — CLIP zero-shot classification with prompt template
                     rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
                     pil_img = PIL.Image.fromarray(rgb_crop)
-                    preds = classifier(pil_img, candidate_labels=TACTICAL_LABELS)
+                    preds = classifier(
+                        pil_img,
+                        candidate_labels=TACTICAL_LABELS,
+                        hypothesis_template=CLIP_PROMPT_TEMPLATE
+                    )
                     label = preds[0]["label"]
                     conf = round(preds[0]["score"] * 100, 1)
 
-                    # Stage 3 — Pinhole altitude estimate
+                    # Stage 3 — Precise Pinhole altitude estimate using per-class wingspan
+                    real_wingspan_m = AIRCRAFT_WINGSPAN_M.get(label, 35.0)
                     w_px = box.xywh[0][2].item()
-                    dist_m = (int((REAL_AIRCRAFT_SIZE_M * FOCAL_LENGTH_PX) / w_px)
+                    dist_m = (int((real_wingspan_m * FOCAL_LENGTH_PX) / w_px)
                               if w_px > 0 else 0)
 
                     boxes.append((x1, y1, x2, y2, label, conf, dist_m))
@@ -281,12 +311,16 @@ def run_ai_eye(shared_streaming_active: multiprocessing.Value) -> None:
     device = 0 if cuda_available else "cpu"
     print(f"[WingID] Device: {'CUDA:0 (GPU)' if cuda_available else 'CPU — inference thread decoupled from stream'}")
 
-    # TensorRT .engine is GPU-only
+    # TensorRT .engine is GPU-only; if absent, fall back to .pt or auto-download
     engine_path = os.path.join(os.path.dirname(__file__), "..", "yolo11l.engine")
     pt_path = os.path.join(os.path.dirname(__file__), "..", "yolo11l.pt")
-    model_path = (engine_path if (cuda_available and os.path.exists(engine_path))
-                  else pt_path)
-    print(f"[WingID] Loading model: {os.path.basename(model_path)}")
+    if cuda_available and os.path.exists(engine_path):
+        model_path = engine_path
+    elif os.path.exists(pt_path):
+        model_path = pt_path
+    else:
+        model_path = "yolo11l.pt"  # Ultralytics auto-downloads from official GitHub releases
+    print(f"[WingID] Loading model: {os.path.basename(model_path) if os.path.exists(model_path) else model_path}")
     model = YOLO(model_path, task="detect")
 
     print("[WingID] Loading CLIP zero-shot classifier...")

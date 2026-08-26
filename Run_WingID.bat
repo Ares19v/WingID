@@ -10,18 +10,6 @@ echo    INITIALIZING DUAL-STACK LAUNCH SEQUENCE
 echo  ================================================================
 echo.
 
-:: ── Pre-flight checks ────────────────────────────────────────────────────────
-echo [CHECK] Verifying virtual environment...
-if not exist "%ROOT%venv\Scripts\activate.bat" (
-    echo.
-    echo  [ERROR] Virtual environment not found.
-    echo.
-    echo  Run INSTALL.bat first to set up the project:
-    echo    Double-click INSTALL.bat
-    echo.
-    pause & exit /b 1
-)
-
 echo [CHECK] Verifying frontend dependencies...
 if not exist "%ROOT%frontend\node_modules\" (
     echo   node_modules not found. Installing frontend dependencies...
@@ -37,10 +25,13 @@ if not exist "%ROOT%frontend\node_modules\" (
 )
 
 :: ── Launch backend ────────────────────────────────────────────────────────────
+set "ACT_CMD="
+if exist "%ROOT%venv\Scripts\activate.bat" set "ACT_CMD=call venv\Scripts\activate && "
+
 echo.
 echo [1/3] Starting ML backend (FastAPI + uvicorn on :8000)...
 start "WingID — Backend" cmd /k ^
-    "cd /d "%ROOT%" && call venv\Scripts\activate && cd backend && python -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
+    "cd /d "%ROOT%" && %ACT_CMD%cd backend && python -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
 
 :: ── Launch frontend ───────────────────────────────────────────────────────────
 echo [2/3] Starting Command Center UI (Vite on :5173)...
@@ -53,28 +44,8 @@ timeout /t 12 /nobreak >nul
 
 echo.
 echo  Opening browser...
-where chrome >nul 2>&1
-if not errorlevel 1 (
-    start "" "chrome" --new-window "http://localhost:5173"
-    goto :launched
-)
-
-set "CHROME64=C:\Program Files\Google\Chrome\Application\chrome.exe"
-set "CHROME32=C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
-
-if exist "%CHROME64%" (
-    start "" "%CHROME64%" --new-window "http://localhost:5173"
-    goto :launched
-)
-if exist "%CHROME32%" (
-    start "" "%CHROME32%" --new-window "http://localhost:5173"
-    goto :launched
-)
-
-:: Fall back to default system browser
 start "" "http://localhost:5173"
 
-:launched
 echo.
 echo  ================================================================
 echo    WINGID SYSTEM ONLINE // ALL SYSTEMS GO

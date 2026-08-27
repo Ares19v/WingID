@@ -24,5 +24,6 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
     "vite": "^8.0.4"
-  }
+  },
+  "description": "Real-time aerospace aircraft detection and optical tracking command center powered by YOLOv8 and telemetry HUD."
 }

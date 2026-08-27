@@ -249,12 +249,6 @@ See **[SPACE_MANAGEMENT.md](SPACE_MANAGEMENT.md)** for a full breakdown (~6–15
 
 ---
 
-## 📜 License
-
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
 <div align="center">
 Built with PyTorch · FastAPI · React · NVIDIA TensorRT
 </div>
@@ -274,3 +268,9 @@ The trained model is available on Hugging Face: [devanshty/WingID](https://huggi
 from huggingface_hub import hf_hub_download
 model_path = hf_hub_download(repo_id='devanshty/WingID', filename='yolo11l.pt')
 ```
+
+---
+
+© 2025 Devansh Tyagi (Ares19v). All Rights Reserved.
+
+Unauthorized copying, modification, distribution, or use of this project or any of its components, in whole or in part, without explicit written permission from the author is strictly prohibited.
